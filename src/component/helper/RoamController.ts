@@ -106,12 +106,12 @@ export type RoamEventDefinition = {
 type RoamPointerChecker = (e: ZRElementEvent, x: number, y: number) => boolean;
 
 /**
- * An manager of zoom and pan(darg) hehavior.
+ * A manager of zoom and pan(drag) behavior.
  * But it is not responsible for updating the view, since view updates vary and can
  * not be handled in a uniform way.
  *
  * Note: regarding view updates:
- *  - Transformabe views typically use `coord/View` (e.g., geo and series.graph roaming).
+ *  - Transformable views typically use `coord/View` (e.g., geo and series.graph roaming).
  *    Some commonly used view update logic has been organized into `roamHelper.ts`.
  *  - Non-transformable views handle updates themselves, possibly involving re-layout,
  *    (e.g., treemap).
@@ -131,6 +131,12 @@ class RoamController extends Eventful<RoamEventDefinition> {
     private _x: number;
 
     private _y: number;
+
+    private _pinchX: number;
+
+    private _pinchY: number;
+
+    private _pinchPanEnabled: boolean;
 
     private _controlType: RoamOptionMixin['roam'];
 
@@ -187,6 +193,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
             if (controlType == null) {
                 controlType = true;
             }
+            const pinchPanEnabled = controlType === true || (controlType === 'move' || controlType === 'pan');
 
             // A quick optimization for repeatedly calling `enable` during roaming.
             // Assert `disable` is only affected by `controlType`.
@@ -205,6 +212,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
                     addRoamZrListener(zr, 'pinch', pinchHandler, zInfoParsed);
                 }
             }
+            this._pinchPanEnabled = pinchPanEnabled;
         };
 
         this.disable = function () {
@@ -215,6 +223,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
                 removeRoamZrListener(zr, 'mouseup', mouseupHandler);
                 removeRoamZrListener(zr, 'mousewheel', mousewheelHandler);
                 removeRoamZrListener(zr, 'pinch', pinchHandler);
+                this._pinchPanEnabled = false;
             }
         };
     }
@@ -355,6 +364,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
         const zr = this._zr;
         if (!eventTool.isMiddleOrRightButtonOnMouseUpDown(e)) {
             this._dragging = false;
+            this._pinching = false;
 
             const cursorStyle = this._decideCursorStyle(e, e.offsetX, e.offsetY, true);
             if (cursorStyle) {
@@ -418,10 +428,47 @@ class RoamController extends Eventful<RoamEventDefinition> {
         ) {
             return;
         }
+        const originX = e.pinchX;
+        const originY = e.pinchY;
+
+        const isTouchStart = e.event.type === 'touchstart';
+        const isPinchStart = !this._pinching || isTouchStart;
+        if (isPinchStart) {
+            if (!isTouchStart || !this._checkPointer(e, originX, originY)) {
+                return;
+            }
+        }
+
+        eventTool.stop(e.event);
+        (e as RoamControllerZREventExtend).__ecRoamConsumed = true;
+
+        const oldX = this._pinchX;
+        const oldY = this._pinchY;
+        this._pinching = true;
+        this._pinchX = originX;
+        this._pinchY = originY;
+
+        if (!isPinchStart
+            && this._pinchPanEnabled
+            && (originX !== oldX || originY !== oldY)
+        ) {
+            trigger(this, 'pan', null, e, {
+                dx: originX - oldX,
+                dy: originY - oldY,
+                oldX: oldX,
+                oldY: oldY,
+                newX: originX,
+                newY: originY,
+                isAvailableBehavior: null
+            });
+        }
+
         const scale = e.pinchScale;
-        this._checkTriggerMoveZoom(this, 'zoom', null, e, {
-            scale: scale, originX: e.pinchX, originY: e.pinchY, isAvailableBehavior: null
-        });
+        if (scale !== 1) {
+            trigger(this, 'zoom', null, e, {
+                scale: scale, originX: originX, originY: originY, isAvailableBehavior: null
+            });
+        }
     }
 
     private _checkTriggerMoveZoom<T extends 'scrollMove' | 'zoom'>(
