@@ -136,7 +136,9 @@ class RoamController extends Eventful<RoamEventDefinition> {
 
     private _pinchY: number;
 
-    private _pinchPanEnabled: boolean;
+    private _moveEnabled: boolean;
+
+    private _zoomEnabled: boolean;
 
     private _controlType: RoamOptionMixin['roam'];
 
@@ -193,7 +195,8 @@ class RoamController extends Eventful<RoamEventDefinition> {
             if (controlType == null) {
                 controlType = true;
             }
-            const pinchPanEnabled = controlType === true || (controlType === 'move' || controlType === 'pan');
+            const moveEnabled = controlType === true || (controlType === 'move' || controlType === 'pan');
+            const zoomEnabled = controlType === true || (controlType === 'scale' || controlType === 'zoom');
 
             // A quick optimization for repeatedly calling `enable` during roaming.
             // Assert `disable` is only affected by `controlType`.
@@ -202,17 +205,20 @@ class RoamController extends Eventful<RoamEventDefinition> {
                 this.disable();
 
                 this._enabled = true;
-                if (controlType === true || (controlType === 'move' || controlType === 'pan')) {
+                if (moveEnabled) {
                     addRoamZrListener(zr, 'mousedown', mousedownHandler, zInfoParsed);
                     addRoamZrListener(zr, 'mousemove', mousemoveHandler, zInfoParsed);
                     addRoamZrListener(zr, 'mouseup', mouseupHandler, zInfoParsed);
                 }
-                if (controlType === true || (controlType === 'scale' || controlType === 'zoom')) {
+                if (zoomEnabled) {
                     addRoamZrListener(zr, 'mousewheel', mousewheelHandler, zInfoParsed);
+                }
+                if (moveEnabled || zoomEnabled) {
                     addRoamZrListener(zr, 'pinch', pinchHandler, zInfoParsed);
                 }
             }
-            this._pinchPanEnabled = pinchPanEnabled;
+            this._moveEnabled = moveEnabled;
+            this._zoomEnabled = zoomEnabled;
         };
 
         this.disable = function () {
@@ -223,7 +229,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
                 removeRoamZrListener(zr, 'mouseup', mouseupHandler);
                 removeRoamZrListener(zr, 'mousewheel', mousewheelHandler);
                 removeRoamZrListener(zr, 'pinch', pinchHandler);
-                this._pinchPanEnabled = false;
+                this._moveEnabled = this._zoomEnabled = false;
             }
         };
     }
@@ -431,6 +437,10 @@ class RoamController extends Eventful<RoamEventDefinition> {
         const originX = e.pinchX;
         const originY = e.pinchY;
 
+        // Gate only the beginning of a pinch capture.
+        // Once captured, keep handling movement outside the roam area.
+        // Requiring a native touchstart for a new capture also
+        //  prevents another RoamController from picking up an already-moving pinch.
         const isTouchStart = e.event.type === 'touchstart';
         const isPinchStart = !this._pinching || isTouchStart;
         if (isPinchStart) {
@@ -442,14 +452,15 @@ class RoamController extends Eventful<RoamEventDefinition> {
         eventTool.stop(e.event);
         (e as RoamControllerZREventExtend).__ecRoamConsumed = true;
 
+        this._pinching = true;
+
         const oldX = this._pinchX;
         const oldY = this._pinchY;
-        this._pinching = true;
         this._pinchX = originX;
         this._pinchY = originY;
 
         if (!isPinchStart
-            && this._pinchPanEnabled
+            && this._moveEnabled
             && (originX !== oldX || originY !== oldY)
         ) {
             trigger(this, 'pan', null, e, {
@@ -464,7 +475,7 @@ class RoamController extends Eventful<RoamEventDefinition> {
         }
 
         const scale = e.pinchScale;
-        if (scale !== 1) {
+        if (this._zoomEnabled && scale !== 1) {
             trigger(this, 'zoom', null, e, {
                 scale: scale, originX: originX, originY: originY, isAvailableBehavior: null
             });
