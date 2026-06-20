@@ -229,7 +229,8 @@ class RoamController extends Eventful<RoamEventDefinition> {
                 removeRoamZrListener(zr, 'mouseup', mouseupHandler);
                 removeRoamZrListener(zr, 'mousewheel', mousewheelHandler);
                 removeRoamZrListener(zr, 'pinch', pinchHandler);
-                this._moveEnabled = this._zoomEnabled = false;
+                this._moveEnabled = false;
+                this._zoomEnabled = false;
             }
         };
     }
